@@ -1,0 +1,83 @@
+1. SSH Key Generation
+Before Ansible can manage the target servers, your Ubuntu control node requires a cryptographic identity. In enterprise environments, Ed25519 is the standard due to its high security and performance compared to legacy RSA keys.
+
+Generate the Key Pair: Execute the following on your Ubuntu control node.
+
+Bash
+ssh-keygen -t ed25519 -C "ansible-qualys-deployment"
+Key Storage: This creates a private key (id_ed25519) which must never leave your control node, and a public key (id_ed25519.pub) which will be distributed to your targets.
+
+Security Note: If your bank's policy requires it, assign a passphrase to the private key. You will use ssh-agent to cache this passphrase during execution so Ansible does not prompt you for every server.
+
+2. Public Key Distribution Options
+The target servers must trust your public key. Choose the method that aligns with your current access level and the bank's infrastructure.
+
+Option A: Centralized Directory (Active Directory / LDAP via SSSD)
+
+Best for: Large enterprise environments.
+
+How it works: You upload your id_ed25519.pub string to your service account's profile in Active Directory (often into the altSecurityIdentities or sshPublicKey attribute).
+
+Result: SSSD on the Linux target servers dynamically queries AD during authentication. No local .authorized_keys files are needed on the target servers.
+
+Option B: Automated Push via Ansible (Bootstrap)
+
+Best for: When you have a temporary overarching password and need to authorize hundreds of servers simultaneously.
+
+Prerequisite: Install sshpass on your Ubuntu node (sudo apt install sshpass).
+
+Command:
+
+Bash
+ansible all -i your_inventory_file -m ansible.posix.authorized_key -a "user=your_target_user state=present key='{{ lookup('file', '~/.ssh/id_ed25519.pub') }}'" --ask-pass
+Option C: Manual Distribution (ssh-copy-id)
+
+Best for: Small batches of servers or initial testing.
+
+Command:
+
+Bash
+ssh-copy-id -i ~/.ssh/id_ed25519.pub user@target-server-ip
+3. Handling Network Segmentation (Jump Hosts)
+If the target servers sit in an isolated banking zone without direct line-of-sight from your Ubuntu node, you must route traffic through a bastion host.
+
+Ad-Hoc SSH Testing through a Bastion:
+
+Bash
+ssh -J user@bastion.bank.local user@target-server-ip
+Ansible Execution through a Bastion: Pass the proxy jump command directly into your playbook run as an extra argument, or define it in your inventory variables as ansible_ssh_common_args='-o ProxyJump=user@bastion.bank.local'.
+
+4. Secrets Management Options for Qualys IDs
+The ActivationId and CustomerId must be protected from plaintext exposure.
+
+Option A: Native Ansible Vault
+
+Creation: Create an encrypted YAML file to store the IDs.
+
+Bash
+ansible-vault create secrets.yml
+Editing: To update the IDs later.
+
+Bash
+ansible-vault edit secrets.yml
+Option B: Enterprise Secret Managers (CyberArk / HashiCorp Vault)
+
+Instead of using Ansible Vault, you can configure your playbook to query the bank's PAM API at runtime using specific collections (e.g., cyberark.conjur or community.hashi_vault).
+
+This pulls the Qualys IDs directly into system memory during the playbook run, leaving zero footprint on the Ubuntu control node's disk.
+
+5. Execution Commands
+Once access is established and secrets are secured, use these commands to trigger the deployment.
+
+Syntax Check (Validation only):
+
+Bash
+ansible-playbook -i your_inventory_file your_playbook_file --syntax-check
+Dry Run (Check Mode): Simulates the deployment to show what files or services would be modified without actually changing the target system.
+
+Bash
+ansible-playbook -i your_inventory_file your_playbook_file --check --ask-vault-pass
+Production Execution: Runs the deployment and prompts for the Ansible Vault password to decrypt your Qualys IDs.
+
+Bash
+ansible-playbook -i your_inventory_file your_playbook_file --ask-vault-pass

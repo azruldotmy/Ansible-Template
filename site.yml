@@ -1,0 +1,127 @@
+---
+- name: Deploy Qualys Cloud Agent
+  hosts: all  # Target 'all' or a combined group containing both OS types
+  become: true
+  vars_files:
+    - secrets.yml
+  vars:
+    qualys_proxy_url: "http://your-enterprise-proxy.bank.local:8080"
+    qualys_deb_url: "https://your-internal-repo/QualysCloudAgent.deb"
+    qualys_rpm_url: "https://your-internal-repo/QualysCloudAgent.rpm"
+    
+  tasks:
+    - name: Check if Qualys Cloud Agent is already provisioned
+      ansible.builtin.stat:
+        path: /etc/qualys/hostid
+      register: qualys_hostid
+
+    # ==========================================
+    # OS-Specific Download and Install Tasks
+    # ==========================================
+
+    - name: Download Qualys Agent (Debian/Ubuntu)
+      ansible.builtin.get_url:
+        url: "{{ qualys_deb_url }}"
+        dest: "/tmp/QualysCloudAgent.deb"
+        mode: '0644'
+      when: not qualys_hostid.stat.exists and ansible_os_family == "Debian"
+
+    - name: Install Qualys Agent (Debian/Ubuntu)
+      ansible.builtin.apt:
+        deb: "/tmp/QualysCloudAgent.deb"
+        state: present
+      when: not qualys_hostid.stat.exists and ansible_os_family == "Debian"
+
+    - name: Download Qualys Agent (RHEL/Rocky Linux)
+      ansible.builtin.get_url:
+        url: "{{ qualys_rpm_url }}"
+        dest: "/tmp/QualysCloudAgent.rpm"
+        mode: '0644'
+      when: not qualys_hostid.stat.exists and ansible_os_family == "RedHat"
+
+    - name: Install Qualys Agent (RHEL/Rocky Linux)
+      ansible.builtin.dnf:
+        name: "/tmp/QualysCloudAgent.rpm"
+        state: present
+        disable_gpg_check: true
+      when: not qualys_hostid.stat.exists and ansible_os_family == "RedHat"
+
+    # ==========================================
+    # Proxy Configuration Tasks
+    # ==========================================
+
+    - name: Configure Proxy (Debian/Ubuntu)
+      ansible.builtin.lineinfile:
+        path: /etc/default/qualys-cloud-agent
+        line: "qualys_https_proxy={{ qualys_proxy_url }}"
+        create: yes
+        owner: root
+        group: root
+        mode: '0600'
+      when: ansible_os_family == "Debian" and qualys_proxy_url | length > 0
+      notify: restart qualys-agent
+
+    - name: Configure Proxy (RHEL/Rocky Linux)
+      ansible.builtin.lineinfile:
+        path: /etc/sysconfig/qualys-cloud-agent
+        line: "qualys_https_proxy={{ qualys_proxy_url }}"
+        create: yes
+        owner: root
+        group: root
+        mode: '0600'
+      when: ansible_os_family == "RedHat" and qualys_proxy_url | length > 0
+      notify: restart qualys-agent
+
+    # ==========================================
+    # Activation and Service Management
+    # ==========================================
+
+    - name: Execute Qualys Cloud Agent Activation
+      ansible.builtin.command:
+        cmd: "/usr/local/qualys/cloud-agent/bin/qualys-cloud-agent.sh ActivationId={{ qualys_activation_id }} CustomerId={{ qualys_customer_id }}"
+      when: not qualys_hostid.stat.exists
+      no_log: true 
+      notify: restart qualys-agent
+
+    - name: Ensure Qualys Cloud Agent service is enabled and running
+      ansible.builtin.service:
+        name: qualys-cloud-agent
+        state: started
+        enabled: yes
+
+  # ==========================================
+  # Handlers
+  # ==========================================
+  handlers:
+    - name: restart qualys-agent
+      ansible.builtin.service:
+        name: qualys-cloud-agent
+        state: restarted
+
+# Run ansible-playbook -i inventory.ini site.yml --syntax-check to ensure the YAML structure is valid.
+
+
+
+
+# ---
+# - name: CIS Benchmark Remediation for Ubuntu 24.04
+  # hosts: ubuntu
+  # become: true
+ # vars:
+ #   ptrace_scope_value: 2  # Change this value to 1, 2, or 3 as per your requirement
+#
+#  tasks:
+#    - import_tasks: chapter1/tasks/main.yml
+#    - import_tasks: chapter2/tasks/main.yml
+#    - import_tasks: chapter3/tasks/main.yml
+#    - import_tasks: chapter4/tasks/main.yml
+#    - import_tasks: chapter5/tasks/main.yml
+#    - import_tasks: chapter6/tasks/main.yml
+#    - import_tasks: chapter7/tasks/main.yml
+
+#  handlers:
+#    - name: Reload sysctl
+#      command: sysctl -p /etc/sysctl.d/60-fs_sysctl.conf
+#    - name: Reload all sysctl
+#      command: sysctl --system"*
+
